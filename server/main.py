@@ -30,10 +30,19 @@ def is_compliant(data):
 
 @sio.on('modify')
 def modify_event(sid,data):
+    print('got',data)
     if not is_compliant(data):
         return
 
-    channels[data['channel']] = data['value']
+    if type(channels[data['channel']]) in (list,dict):
+        for elem in data['value']:
+            if type(channels[data['channel']]) == list:
+                cur_index = int(elem['index'])
+            else:
+                cur_index = elem['index']
+            channels[data['channel']][cur_index] = elem['val']
+    else:
+        channels[data['channel']] = data['value']
 
     sio.emit('modify',{'channel' : data['channel'] , 'value' : data['value']},room=data['channel'],skip_sid=sid)
 
@@ -47,7 +56,7 @@ def delete_event(sid,data):
         channels[data['channel']].pop(elem-dec)
         dec+=1
     
-    sio.emit('delete',{'channel' : data['channel'], 'value' : data['value']})
+    sio.emit('delete',{'channel' : data['channel'], 'value' : data['value']},skip_sid=sid)
 
 @sio.on('add')
 def add_event(sid,data):
@@ -57,7 +66,7 @@ def add_event(sid,data):
     for elem in data['value']:
         channels[data['channel']].append(elem)
     
-    sio.emit('add',{'channel' : data['channel'],'value' : data['value']})
+    sio.emit('add',{'channel' : data['channel'],'value' : data['value']},skip_sid=sid)
 
 
 

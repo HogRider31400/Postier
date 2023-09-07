@@ -2,7 +2,11 @@
 
 import {io} from 'socket.io-client'
 import { Socket } from 'socket.io-client'
-import { Ref, WatchStopHandle, isRef,toRaw,watch } from 'vue'
+import { Ref, WatchStopHandle, isRef,toRaw,toValue,watch } from 'vue'
+
+function realValue(obj : any) : any {
+    return JSON.parse(JSON.stringify(toRaw(obj)))
+}
 
 const ADD_EVENT = 'add'
 const MODIFY_EVENT = 'modify'
@@ -70,10 +74,19 @@ class Postier{
             return;
         }
 
+
+
         let dataObj = this.channelsSubscribed[data.channel];
-        for(var elem of data.val){
+
+        //On stop le watcher le temps de modif la fonction
+        dataObj.watcherStop()
+
+        for(var elem of data.value){
             dataObj.val.push(elem)
         }
+
+        this.channelsSubscribed[data.channel].oldValue = realValue(dataObj.val)
+        this.channelsSubscribed[data.channel].watcherStop = this.watcherFun(data.channel,dataObj.val,dataObj.type)
     }
 
     private handleDelete(data : any){
@@ -82,11 +95,17 @@ class Postier{
         }
 
         let dataObj = this.channelsSubscribed[data.channel];
+
+        //On stop le watcher le temps de modif la fonction
+        dataObj.watcherStop()
+
         var dec = 0;
-        for(var elem of data.val){
+        for(var elem of data.value){
             dataObj.val.splice(elem - dec,1)
             dec++;
         }
+        this.channelsSubscribed[data.channel].oldValue = realValue(dataObj.val)
+        this.channelsSubscribed[data.channel].watcherStop = this.watcherFun(data.channel,dataObj.val,dataObj.type)
     }
 
     private handleModify(data : any){
@@ -95,6 +114,9 @@ class Postier{
         }
 
         let dataObj = this.channelsSubscribed[data.channel]
+
+        //On stop le watcher le temps de modif la fonction
+        dataObj.watcherStop()
 
         if(dataObj.type == 'ref'){
             dataObj.val.value = data.value
@@ -105,7 +127,9 @@ class Postier{
                 dataObj.val[elem.index] = elem.val
             }
         }
-
+        
+        this.channelsSubscribed[data.channel].oldValue = realValue(dataObj.val)
+        this.channelsSubscribed[data.channel].watcherStop = this.watcherFun(data.channel,dataObj.val,dataObj.type)
     }
 
     /**
@@ -117,47 +141,69 @@ class Postier{
     public subscribe(channel : string,obj : any) : void{
         console.log('subscribed to',channel)
         const objType = (isRef(obj) ? 'ref' : 'reactive')
-        const oldValue = toRaw(obj)
-        console.log(objType)
+        const oldValue = realValue(obj)
+        console.log(objType,oldValue)
         this.channelsSubscribed[channel] = {
             type : objType,
             val : obj,
             oldValue : oldValue,
-            watcherStop : watch(obj,(newValue) => {
-                const oldValue = this.channelsSubscribed[channel].oldValue
-                if(objType == 'reactive'){
-                    try {
-                        console.log(newValue.length,oldValue.length)
-                        console.log(newValue,oldValue)
-                        if(newValue.length > oldValue.length){
-                            this.emitAdd(channel,newValue,oldValue)
-                        }
-                        else if(newValue.length < oldValue.length){
-                            this.emitDelete(channel,newValue,oldValue)
-                        }
-                        else{
-                            this.emitModification(channel,objType,newValue,oldValue)
-                        }
-                    }
-                    catch(error){
-                        this.emitModification(channel,objType,newValue,oldValue)
-                    }
-                }
-                else{
-                    this.emitModification(channel,objType,newValue,oldValue)
-                }
-            })
+            watcherStop : this.watcherFun(channel,obj,objType)
         }
         this.sendSubscription(channel)
     }
 
+    private watcherFun(channel : string, obj : any,objType : any){
+        return watch(obj,(newValue) => {
+            const oldValue = this.channelsSubscribed[channel].oldValue
+            if(objType == 'reactive'){
+                try {
+                    console.log(newValue.length,oldValue.length)
+                    console.log(newValue,oldValue)
+                    if(newValue.length > oldValue.length){
+                        this.emitAdd(channel,newValue,oldValue)
+                    }
+                    else if(newValue.length < oldValue.length){
+                        this.emitDelete(channel,newValue,oldValue)
+                    }
+                    else{
+                        this.emitModification(channel,objType,newValue,oldValue)
+                    }
+                }
+                catch(error){
+                    this.emitModification(channel,objType,newValue,oldValue)
+                }
+            }
+            else{
+                this.emitModification(channel,objType,newValue,oldValue)
+            }
+            this.channelsSubscribed[channel].oldValue = realValue(newValue)
+        })
+    }
+
     private emitModification(channel : string,type : 'ref' | 'reactive',newValue : any,oldValue : any){
+        console.log('sending',realValue(newValue))
+
+        if(type == 'ref'){
+            var toSend = realValue(newValue)
+        }
+        else{
+            var toSend : any = []
+            for(var elem of Object.keys(realValue(newValue))){
+                if(newValue[elem] !== oldValue[elem]){
+                    toSend.push({
+                        index : elem,
+                        val : newValue[elem]
+                    })
+                }
+            }
+        }
+
         this.socket.emit('modify',{
             channel : channel,
-            value : newValue
+            value : toSend
         })
 
-        this.channelsSubscribed[channel].oldValue = toRaw(newValue)
+        this.channelsSubscribed[channel].oldValue = realValue(newValue)
     }
 
     private emitAdd(channel : string, newValue : any,oldValue : any){
@@ -175,7 +221,16 @@ class Postier{
         const elemsDeleted = [];
 
         for(var i = 0; i < oldValue.length;i++){
-            if(!newValue.includes(oldValue[i])){
+            var isDeleted = false
+            for(var elem of newValue){
+                if(JSON.stringify(elem)==JSON.stringify(oldValue[i])){
+                    console.log("trouve")
+                    isDeleted = true
+                    break
+                }
+            }
+
+            if(!isDeleted){
                 elemsDeleted.push(i);
             }
         }
