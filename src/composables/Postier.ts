@@ -2,7 +2,7 @@
 
 import {io} from 'socket.io-client'
 import { Socket } from 'socket.io-client'
-import { Ref, WatchStopHandle, isRef,toRaw,toValue,watch } from 'vue'
+import { Ref, WatchStopHandle, isRef,toRaw,toValue,watch,onMounted, onUnmounted, onBeforeUnmount } from 'vue'
 
 function realValue(obj : any) : any {
     return JSON.parse(JSON.stringify(toRaw(obj)))
@@ -11,6 +11,7 @@ function realValue(obj : any) : any {
 const ADD_EVENT = 'add'
 const MODIFY_EVENT = 'modify'
 const DELETE_EVENT = 'delete'
+const SET_EVENT = 'set'
 
 interface channelDictionnary {
     [index: string]: {
@@ -55,6 +56,9 @@ class Postier{
         this.socket.on(DELETE_EVENT, (data) => {
             this.handleDelete(data)
         })
+        this.socket.on(SET_EVENT, (data) => {
+            this.handleSet(data)
+        })
     }
 
     private isCompliant(data : any) : boolean{
@@ -67,6 +71,27 @@ class Postier{
             return false;
         }
         return true
+    }
+
+    private handleSet(data : any){
+        if(!this.isCompliant(data)){
+            return
+        }
+        console.log('received a set',data)
+        let dataObj = this.channelsSubscribed[data.channel];
+        dataObj.watcherStop()
+        
+        this.channelsSubscribed[data.channel].oldValue = realValue(dataObj.val)
+        if(dataObj.type == 'ref'){
+            this.channelsSubscribed[data.channel].val.value = data.value
+        }
+        else{
+            for(var elem of Object.keys(data.value)){
+                this.channelsSubscribed[data.channel].val[elem] = data.value[elem]
+            }
+        }
+        this.channelsSubscribed[data.channel].oldValue = realValue(this.channelsSubscribed[data.channel].val)
+        this.channelsSubscribed[data.channel].watcherStop = this.watcherFun(data.channel,dataObj.val,dataObj.type)
     }
 
     private handleAdd(data : any){
@@ -250,6 +275,7 @@ class Postier{
         this.socket.emit('unsubscribe',{
             channel : channel
         })
+        delete this.channelsSubscribed[channel]
     }
 
     /**
@@ -264,15 +290,28 @@ class Postier{
     }
 }
 
-function createPostier(adresse : string = 'localhost', port : string | number = 1234) : Postier{
-
+function createPostier(adresse : string = 'localhost', port : string | number = 1234,initialSubscribers : {[index : string] : any} = {}) : Postier{
 
     const newPostier = new Postier(
         adresse,
         port
     )
 
+    onMounted(() => {
+        for(var elem of Object.keys(initialSubscribers)){
+            newPostier.subscribe(elem,initialSubscribers[elem])
+        }
+    })
+
+    onUnmounted(() => {
+        for(var elem of Object.keys(initialSubscribers)){
+            newPostier.unsubscribe(elem)
+        }
+
+    })
+
     return newPostier
 }
+
 
 export {createPostier}

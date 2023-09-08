@@ -5,15 +5,10 @@ import {createPostier} from './composables/Postier'
 import { v4 as uuidv4 } from 'uuid';
 const compte = reactive([]);
 
-const postierInstance = createPostier()
-
-onMounted(() => {
-  postierInstance.subscribe('counter',compte)
+const postierInstance = createPostier('localhost',1234,{
+  'counter' : compte
 })
 
-onUnmounted(() => {
-  postierInstance.unsubscribe('counter')
-})
 
 
 function createOne(){

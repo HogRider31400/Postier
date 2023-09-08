@@ -21,7 +21,18 @@ def subscribe_event(sid,data):
         return
     
     subscribers[data['channel']].append(sid)
+    sio.emit('set',{'channel' : data['channel'], 'value' : channels[data['channel']]},room=sid)
     sio.enter_room(sid,data['channel'])
+
+@sio.on('unsubscribe')
+def unsubscribe_event(sid,data):
+    print('ccc la team',sid,data)
+    if not 'channel' in data:
+        return
+
+    subscribers[data['channel']].remove(sid)
+    sio.leave_room(sid,data['channel'])
+    print(sid,'just unsubscribed',subscribers[data['channel']],'YEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH')
 
 def is_compliant(data):
     if not 'channel' in data:
